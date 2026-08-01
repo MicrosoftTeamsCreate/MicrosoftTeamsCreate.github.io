@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Team Forge — Provision a Team</title>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --bg:#0D1117; --panel:#151B24; --panel2:#1B2330; --border:#2A3444;
+    --ember:#F2A65A; --ember-deep:#D9822B; --spark:#5EEAD4;
+    --text:#E7ECF3; --muted:#8A97AB; --faint:#5C6779;
+    --ok:#4ADE80; --warn:#F2A65A; --danger:#F87171;
+    --radius:12px; --mono:'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(242,166,90,.08), transparent),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(94,234,212,.06), transparent),
+      var(--bg);
+    color:var(--text); font-family:'Inter',sans-serif; min-height:100vh;
+  }
+  h1,h2,h3,.display{font-family:'Sora',sans-serif}
+  .mono{font-family:var(--mono)}
+  .hide{display:none !important}
+
+  /* ===== Sign-in screen ===== */
+  #signin{
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:24px;
+  }
+  .forge-mark{
+    width:64px; height:64px; margin-bottom:22px;
+    background:linear-gradient(135deg, var(--ember), var(--ember-deep));
+    border-radius:16px; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 12px 40px rgba(242,166,90,.25);
+  }
+  .forge-mark svg{width:32px;height:32px}
+  #signin h1{font-size:38px; font-weight:800; margin:0 0 8px; letter-spacing:-.02em}
+  #signin p{color:var(--muted); font-size:15px; max-width:440px; margin:0 0 30px; line-height:1.6}
+  .btn{
+    border:none; border-radius:10px; padding:13px 26px; font-size:14.5px; font-weight:600;
+    cursor:pointer; font-family:'Inter',sans-serif; transition:transform .12s, box-shadow .12s;
+  }
+  .btn:active{transform:scale(.97)}
+  .btn.primary{
+    background:linear-gradient(135deg, var(--ember), var(--ember-deep)); color:#1A1206;
+    box-shadow:0 8px 24px rgba(242,166,90,.25);
+  }
+  .btn.primary:hover{box-shadow:0 10px 30px rgba(242,166,90,.35)}
+  .btn.ghost{background:var(--panel2); color:var(--text); border:1px solid var(--border)}
+  .btn.ghost:hover{border-color:var(--ember)}
+  .btn.danger{background:transparent; color:var(--danger); border:1px solid rgba(248,113,113,.4)}
+  .btn:disabled{opacity:.5; cursor:not-allowed}
+  #signinNote{margin-top:26px; font-size:12px; color:var(--faint); max-width:420px; line-height:1.6}
+
+  /* ===== App shell ===== */
+  #app{max-width:920px; margin:0 auto; padding:32px 24px 80px}
+  #topbar{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:34px;
+    padding-bottom:18px; border-bottom:1px solid var(--border);
+  }
+  #topbar .brand{display:flex; align-items:center; gap:10px}
+  #topbar .brand .forge-mark{width:34px;height:34px;margin:0;border-radius:9px}
+  #topbar .brand .forge-mark svg{width:18px;height:18px}
+  #topbar .brand-text{font-weight:800; font-size:16px; letter-spacing:-.01em}
+  #topbar .who{font-size:12.5px; color:var(--muted)}
+
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:26px; margin-bottom:20px}
+  .card h2{font-size:16px; margin:0 0 4px; font-weight:700}
+  .card .sub{color:var(--muted); font-size:13px; margin:0 0 20px; line-height:1.5}
+
+  label.field-label{display:block; font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:7px}
+  .field{margin-bottom:16px}
+  input[type=text], input[type=email], input[type=number], select, textarea{
+    width:100%; background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; color:var(--text); font-size:14px; font-family:'Inter',sans-serif;
+  }
+  input:focus, select:focus, textarea:focus{outline:none; border-color:var(--ember)}
+  input::placeholder{color:var(--faint)}
+  .row{display:flex; gap:12px}
+  .row > *{flex:1}
+
+  /* channel rows */
+  #channelRows{display:flex; flex-direction:column; gap:10px; margin-top:6px}
+  .channel-row{
+    display:flex; gap:10px; align-items:center; background:var(--panel2);
+    border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+    animation:slideIn .22s ease;
+  }
+  @keyframes slideIn{from{opacity:0; transform:translateY(-6px)} to{opacity:1; transform:translateY(0)}}
+  .channel-row .idx{font-family:var(--mono); font-size:12px; color:var(--faint); width:20px}
+  .channel-row input[type=text]{flex:1}
+  .channel-row select{width:130px; flex:none}
+
+  /* chips (owners) */
+  .chip-wrap{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+  .chip{
+    display:inline-flex; align-items:center; gap:6px; background:var(--panel2);
+    border:1px solid var(--border); border-radius:999px; padding:5px 6px 5px 12px; font-size:12.5px;
+  }
+  .chip button{border:none; background:none; color:var(--danger); cursor:pointer; font-size:14px; line-height:1; padding:2px 4px}
+  .chip .role-toggle{border:none; background:none; cursor:pointer; font-size:11px; padding:2px 4px; color:var(--muted)}
+  .chip .role-toggle.owner{color:var(--ember)}
+
+  .search-wrap{position:relative}
+  .search-results{
+    position:absolute; left:0; right:0; top:100%; margin-top:4px; z-index:30;
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    max-height:220px; overflow:auto; box-shadow:0 12px 30px rgba(0,0,0,.4);
+  }
+  .search-row{padding:9px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border)}
+  .search-row:last-child{border-bottom:none}
+  .search-row:hover{background:var(--panel)}
+  .search-row .sub{color:var(--muted); font-size:11.5px}
+  .search-empty{padding:9px 12px; color:var(--muted); font-size:12.5px}
+
+  /* access group rows */
+  #groupRows{display:flex; flex-direction:column; gap:10px}
+  .group-row{
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:12px;
+  }
+  .group-row .top{display:flex; gap:10px; align-items:flex-start}
+  .group-row .top .search-wrap{flex:1}
+  .group-row .access-line{display:flex; gap:16px; margin-top:10px; font-size:12.5px}
+  .group-row .access-line label{display:flex; align-items:center; gap:6px; color:var(--muted)}
+  .group-row .remove{border:none;background:none;color:var(--danger); cursor:pointer; font-size:13px}
+  .group-row.resolved{border-color:var(--spark)}
+  .group-row .resolved-name{font-weight:600; font-size:13.5px}
+
+  .spin{display:inline-block; width:12px; height:12px; border:2px solid var(--faint); border-top-color:var(--ember); border-radius:50%; animation:sp .7s linear infinite; vertical-align:-2px; margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  #status{font-size:13.5px; line-height:1.7}
+  #status .line{margin-bottom:4px}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .danger{color:var(--danger)}
+
+  .add-link{background:none; border:1px dashed var(--border); color:var(--muted); border-radius:8px; padding:9px; width:100%; cursor:pointer; font-size:13px; font-family:'Inter',sans-serif}
+  .add-link:hover{border-color:var(--ember); color:var(--ember)}
+
+  .footbar{display:flex; align-items:center; gap:12px; margin-top:6px}
+  .hint{font-size:11.5px; color:var(--faint); line-height:1.6; margin-top:8px}
+</style>
+</head>
+<body>
+
+<!-- ============ SIGN-IN ============ -->
+<div id="signin">
+  <div class="forge-mark">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 7l8 5 8-5M12 12v10" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  </div>
+  <h1>Team Forge</h1>
+  <p>Sign in with your work account to provision a new Microsoft Team — channels, a shared Resource Hub library, and group-based folder permissions, all in one pass.</p>
+  <button class="btn primary" id="btnSignIn">Sign in with Microsoft</button>
+  <div id="signinNote">
+    Works with any Microsoft 365 organization. You'll be asked to consent to a handful of permissions the first time — team creation, channel membership, and SharePoint file access — scoped to your own account, nothing is shared across organizations.
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hide">
+  <div id="topbar">
+    <div class="brand">
+      <div class="forge-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 7l8 5 8-5M12 12v10" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+      <span class="brand-text">Team Forge</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:14px">
+      <span class="who" id="whoami"></span>
+      <button class="btn ghost" id="btnSignOut" style="padding:7px 14px; font-size:12.5px">Sign out</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Team details</h2>
+    <p class="sub">The basics — this becomes the Microsoft 365 group and Team name.</p>
+    <div class="field">
+      <label class="field-label">Team name</label>
+      <input type="text" id="teamName" placeholder="e.g. Finance Ops" />
+    </div>
+    <div class="row">
+      <div class="field">
+        <label class="field-label">Description <span style="text-transform:none;color:var(--faint)">(optional)</span></label>
+        <input type="text" id="teamDesc" placeholder="What's this team for?" />
+      </div>
+      <div class="field" style="max-width:180px">
+        <label class="field-label">Privacy</label>
+        <select id="teamPrivacy"><option value="Private">Private</option><option value="Public">Public</option></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Owners</h2>
+    <p class="sub">Everyone added here becomes a team owner, and an owner of any private channels below.</p>
+    <div class="search-wrap">
+      <input type="text" id="ownerSearch" placeholder="Type a name or email…" autocomplete="off" />
+      <div class="search-results hide" id="ownerResults"></div>
+    </div>
+    <div class="chip-wrap" id="ownerChips"></div>
+  </div>
+
+  <div class="card">
+    <h2>Channels</h2>
+    <p class="sub">Choose how many channels to create, then name each one and pick Standard or Private.</p>
+    <div class="field" style="max-width:220px">
+      <label class="field-label">Number of channels</label>
+      <select id="channelCount">
+        <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+        <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+      </select>
+    </div>
+    <div id="channelRows"></div>
+    <div class="hint">Channel 1 becomes the team's first channel — if it's Standard, it takes that name directly instead of Teams' default "General". If Channel 1 is Private, a "General" channel is created automatically alongside it (Teams requires at least one standard channel), and your named channel is created as private separately.</div>
+  </div>
+
+  <div class="card">
+    <h2>Resource Hub library</h2>
+    <p class="sub">A shared document library with Knowledge Base and Vault folders, pinned as a tab in every channel.</p>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13.5px; margin-bottom:4px">
+      <input type="checkbox" id="resourceHubEnabled" checked style="width:auto" />
+      Create the Resource Hub library
+    </label>
+  </div>
+
+  <div class="card" id="accessGroupsCard">
+    <h2>Folder access groups <span style="color:var(--faint); font-weight:400">(optional)</span></h2>
+    <p class="sub">Give specific security groups Read or Write access to Knowledge Base and/or Vault. Everyone else — including regular team members — is denied by default, matching how the folders' permissions are locked down.</p>
+    <div id="groupRows"></div>
+    <button class="add-link" id="btnAddGroup" style="margin-top:10px">+ Add an access group</button>
+  </div>
+
+  <div class="card">
+    <div class="footbar">
+      <button class="btn primary" id="btnCreate">Create team</button>
+      <span style="flex:1"></span>
+    </div>
+    <div id="status" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   CONFIG — fill in your own multi-tenant app registration
+   ============================================================
+   1. Entra portal → App registrations → New registration
+      - Supported account types: "Accounts in any organizational directory"
+      - Redirect URI: Single-page application → this site's exact URL
+   2. API permissions → Microsoft Graph → Delegated:
+        User.Read, User.ReadBasic.All, Group.ReadWrite.All,
+        Sites.Manage.All, Files.ReadWrite.All,
+        TeamMember.ReadWrite.All, ChannelMember.ReadWrite.All
+      Grant admin consent (or let each signing-in admin consent for their own org).
+   3. Paste the Application (client) ID below.
+*/
+const CLIENT_ID = "0503645a-17e4-4a09-a6d7-21b850643b42";
+const REDIRECT_URI = window.location.origin + window.location.pathname;
+const GRAPH = "https://graph.microsoft.com/v1.0";
+
+const msalApp = new msal.PublicClientApplication({
+  auth: {
+    clientId: CLIENT_ID,
+    authority: "https://login.microsoftonline.com/organizations", // any work/school account, any org
+    redirectUri: REDIRECT_URI,
+  },
+  cache: { cacheLocation: "sessionStorage" },
+});
+
+const SCOPES = [
+  "User.Read", "User.ReadBasic.All", "Group.ReadWrite.All",
+  "Sites.Manage.All", "Files.ReadWrite.All",
+  "TeamMember.ReadWrite.All", "ChannelMember.ReadWrite.All",
+];
+
+let account = null;
+
+function el(id){ return document.getElementById(id); }
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function token(scopes){
+  const req = { scopes, account };
+  try{ return (await msalApp.acquireTokenSilent(req)).accessToken; }
+  catch(e){ return (await msalApp.acquireTokenPopup(req)).accessToken; }
+}
+
+/* ============ Sign-in ============ */
+msalApp.initialize().then(() => {
+  const accounts = msalApp.getAllAccounts();
+  if(accounts.length){ account = accounts[0]; enterApp(); }
+});
+
+el("btnSignIn").onclick = async () => {
+  try{
+    const res = await msalApp.loginPopup({ scopes: SCOPES });
+    account = res.account;
+    enterApp();
+  }catch(e){ alert("Sign-in failed: " + (e.message || e)); }
+};
+el("btnSignOut").onclick = () => msalApp.logoutRedirect({ account });
+
+function enterApp(){
+  el("signin").classList.add("hide");
+  el("app").classList.remove("hide");
+  el("whoami").textContent = account.username;
+  renderChannelRows();
+}
+
+/* ============ Owner picker (directory search + chips) ============ */
+let owners = []; // {id, displayName, mail}
+let ownerSearchSeq = 0;
+
+function renderOwnerChips(){
+  el("ownerChips").innerHTML = owners.map((o,i) => `
+    <span class="chip">${escapeHtml(o.displayName)}
+      <button type="button" data-i="${i}">×</button>
+    </span>`).join("");
+  el("ownerChips").querySelectorAll("button").forEach(b => {
+    b.onclick = () => { owners.splice(+b.dataset.i, 1); renderOwnerChips(); };
+  });
+}
+
+async function searchDirectory(query, kind){
+  const tok = await token(SCOPES);
+  const url = kind === "group"
+    ? `${GRAPH}/groups?$search="displayName:${encodeURIComponent(query)}"&$select=id,displayName,mail&$top=8&$orderby=displayName`
+    : `${GRAPH}/users?$search="displayName:${encodeURIComponent(query)}" OR "mail:${encodeURIComponent(query)}"&$select=id,displayName,mail,userPrincipalName&$top=8&$orderby=displayName`;
+  const r = await fetch(url, { headers:{ Authorization:`Bearer ${tok}`, ConsistencyLevel:"eventual" } });
+  if(!r.ok) throw new Error(`Search failed (${r.status})`);
+  return (await r.json()).value || [];
+}
+
+el("ownerSearch").oninput = (e) => {
+  const q = e.target.value.trim();
+  const box = el("ownerResults");
+  clearTimeout(el("ownerSearch")._t);
+  if(q.length < 2){ box.classList.add("hide"); return; }
+  el("ownerSearch")._t = setTimeout(async () => {
+    const mySeq = ++ownerSearchSeq;
+    box.classList.remove("hide");
+    box.innerHTML = `<div class="search-empty"><span class="spin"></span>Searching…</div>`;
+    let people;
+    try{ people = await searchDirectory(q, "user"); }
+    catch(err){ if(mySeq!==ownerSearchSeq) return; box.innerHTML = `<div class="search-empty">${escapeHtml(err.message)}</div>`; return; }
+    if(mySeq !== ownerSearchSeq) return;
+    people = people.filter(p => !owners.some(o => o.id === p.id));
+    if(!people.length){ box.innerHTML = `<div class="search-empty">No matches</div>`; return; }
+    box.innerHTML = people.map(p => `
+      <div class="search-row" data-id="${escapeHtml(p.id)}">
+        <div>${escapeHtml(p.displayName||"")}</div>
+        <div class="sub">${escapeHtml(p.mail||p.userPrincipalName||"")}</div>
+      </div>`).join("");
+    box.querySelectorAll(".search-row").forEach(row => {
+      row.onclick = () => {
+        const p = people.find(x => x.id === row.dataset.id);
+        owners.push({ id:p.id, displayName:p.displayName||p.mail, mail:p.mail||p.userPrincipalName });
+        renderOwnerChips();
+        el("ownerSearch").value = ""; box.classList.add("hide");
+      };
+    });
+  }, 300);
+};
+document.addEventListener("click", (e) => {
+  if(!e.target.closest("#ownerSearch") && !e.target.closest("#ownerResults")) el("ownerResults").classList.add("hide");
+});
+
+/* ============ Channel rows ============ */
+function renderChannelRows(){
+  const n = parseInt(el("channelCount").value, 10);
+  const wrap = el("channelRows");
+  const existing = [...wrap.querySelectorAll(".channel-row")].map(r => ({
+    name: r.querySelector(".ch-name").value,
+    type: r.querySelector(".ch-type").value,
+  }));
+  wrap.innerHTML = Array.from({length:n}, (_,i) => `
+    <div class="channel-row">
+      <span class="idx mono">${i+1}</span>
+      <input type="text" class="ch-name" placeholder="Channel ${i+1} name" value="${escapeHtml(existing[i]?.name||"")}" />
+      <select class="ch-type">
+        <option value="Standard" ${existing[i]?.type==="Private"?"":"selected"}>Standard</option>
+        <option value="Private" ${existing[i]?.type==="Private"?"selected":""}>Private</option>
+      </select>
+    </div>`).join("");
+}
+el("channelCount").onchange = renderChannelRows;
+
+/* ============ Access group rows ============ */
+let accessGroups = []; // {rowId, id, displayName, kb, vault}
+let groupRowSeq = 0;
+
+function renderGroupRows(){
+  el("groupRows").innerHTML = accessGroups.map(g => {
+    if(g.id){
+      return `
+      <div class="group-row resolved" data-row="${g.rowId}">
+        <div class="top">
+          <div style="flex:1">
+            <div class="resolved-name">${escapeHtml(g.displayName)}</div>
+          </div>
+          <button class="remove" data-row="${g.rowId}">Remove</button>
+        </div>
+        <div class="access-line">
+          <label>Knowledge Base:
+            <select class="kb-access" data-row="${g.rowId}" style="width:auto;padding:4px 8px">
+              <option value="none" ${g.kb==="none"?"selected":""}>No access</option>
+              <option value="read" ${g.kb==="read"?"selected":""}>Read</option>
+              <option value="write" ${g.kb==="write"?"selected":""}>Read/Write</option>
+            </select>
+          </label>
+          <label>Vault:
+            <select class="vault-access" data-row="${g.rowId}" style="width:auto;padding:4px 8px">
+              <option value="none" ${g.vault==="none"?"selected":""}>No access</option>
+              <option value="read" ${g.vault==="read"?"selected":""}>Read</option>
+              <option value="write" ${g.vault==="write"?"selected":""}>Read/Write</option>
+            </select>
+          </label>
+        </div>
+      </div>`;
+    }
+    return `
+      <div class="group-row" data-row="${g.rowId}">
+        <div class="top">
+          <div class="search-wrap">
+            <input type="text" class="group-search" data-row="${g.rowId}" placeholder="Type a security group name…" autocomplete="off" />
+            <div class="search-results hide"></div>
+          </div>
+          <button class="remove" data-row="${g.rowId}">Remove</button>
+        </div>
+      </div>`;
+  }).join("");
+
+  el("groupRows").querySelectorAll(".remove").forEach(b => {
+    b.onclick = () => { accessGroups = accessGroups.filter(g => g.rowId !== b.dataset.row); renderGroupRows(); };
+  });
+  el("groupRows").querySelectorAll(".kb-access").forEach(s => {
+    s.onchange = () => { accessGroups.find(g=>g.rowId===s.dataset.row).kb = s.value; };
+  });
+  el("groupRows").querySelectorAll(".vault-access").forEach(s => {
+    s.onchange = () => { accessGroups.find(g=>g.rowId===s.dataset.row).vault = s.value; };
+  });
+  el("groupRows").querySelectorAll(".group-search").forEach(input => {
+    input.oninput = (e) => {
+      const q = e.target.value.trim();
+      const rowId = input.dataset.row;
+      const box = input.parentElement.querySelector(".search-results");
+      clearTimeout(input._t);
+      if(q.length < 2){ box.classList.add("hide"); return; }
+      input._t = setTimeout(async () => {
+        const mySeq = ++groupRowSeq;
+        box.classList.remove("hide");
+        box.innerHTML = `<div class="search-empty"><span class="spin"></span>Searching…</div>`;
+        let groups;
+        try{ groups = await searchDirectory(q, "group"); }
+        catch(err){ if(mySeq!==groupRowSeq) return; box.innerHTML = `<div class="search-empty">${escapeHtml(err.message)}</div>`; return; }
+        if(mySeq !== groupRowSeq) return;
+        if(!groups.length){ box.innerHTML = `<div class="search-empty">No matches</div>`; return; }
+        box.innerHTML = groups.map(g => `
+          <div class="search-row" data-id="${escapeHtml(g.id)}">
+            <div>${escapeHtml(g.displayName||"")}</div>
+          </div>`).join("");
+        box.querySelectorAll(".search-row").forEach(row => {
+          row.onclick = () => {
+            const g = groups.find(x => x.id === row.dataset.id);
+            const entry = accessGroups.find(x => x.rowId === rowId);
+            entry.id = g.id; entry.displayName = g.displayName;
+            entry.kb = "read"; entry.vault = "none";
+            renderGroupRows();
+          };
+        });
+      }, 300);
+    };
+  });
+}
+
+el("btnAddGroup").onclick = () => {
+  accessGroups.push({ rowId: "g" + Date.now() + Math.random().toString(36).slice(2,6), id:null, displayName:"", kb:"none", vault:"none" });
+  renderGroupRows();
+};
+
+/* ============================================================
+   CREATE TEAM — orchestration
+   ============================================================ */
+function memberBody(userId, role){
+  return {
+    "@odata.type": "#microsoft.graph.aadUserConversationMember",
+    roles: role ? [role] : [],
+    "user@odata.bind": `${GRAPH}/users('${userId}')`,
+  };
+}
+
+async function ensureOwner(tok, membersUrl, user){
+  const r = await fetch(membersUrl, { headers:{ Authorization:`Bearer ${tok}` } });
+  if(!r.ok) return { ok:false, detail:`list members failed (${r.status})` };
+  const members = (await r.json()).value || [];
+  const match = members.find(m => m.userId === user.id);
+
+  if(match && (match.roles||[]).includes("owner")) return { ok:true, status:"already owner" };
+
+  if(match){
+    const pr = await fetch(`${membersUrl}/${match.id}`, {
+      method:"PATCH", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
+      body: JSON.stringify({ "@odata.type":"#microsoft.graph.aadUserConversationMember", roles:["owner"] }),
+    });
+    return pr.ok ? { ok:true, status:"promoted" } : { ok:false, detail:`promote failed (${pr.status})` };
+  }
+
+  const ar = await fetch(membersUrl, {
+    method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
+    body: JSON.stringify(memberBody(user.id, "owner")),
+  });
+  return ar.ok ? { ok:true, status:"added" } : { ok:false, detail:`add failed (${ar.status})` };
+}
+
+async function graphCreateFolder(tok, driveId, parentId, name){
+  const r = await fetch(`${GRAPH}/drives/${driveId}/items/${parentId}/children?$select=id,name,folder`, { headers:{ Authorization:`Bearer ${tok}` } });
+  if(r.ok){
+    const existing = (await r.json()).value.find(i => i.name===name && i.folder);
+    if(existing) return existing;
+  }
+  const cr = await fetch(`${GRAPH}/drives/${driveId}/items/${parentId}/children`, {
+    method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
+    body: JSON.stringify({ name, folder:{}, "@microsoft.graph.conflictBehavior":"fail" }),
+  });
+  if(!cr.ok) throw new Error(`Folder "${name}" failed (${cr.status})`);
+  return cr.json();
+}
+
+async function grantFolderAccess(tok, driveId, itemId, recipient, role, breakInheritance){
+  const body = { recipients:[recipient], roles:[role], requireSignIn:true, sendInvitation:false };
+  if(breakInheritance) body.retainInheritedPermissions = false;
+  const r = await fetch(`${GRAPH}/drives/${driveId}/items/${itemId}/invite`, {
+    method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
+    body: JSON.stringify(body),
+  });
+  if(!r.ok){ const t = await r.text().catch(()=>""); return { ok:false, detail:`${r.status}: ${t.slice(0,150)}` }; }
+  return { ok:true };
+}
+
+async function waitForGroupSite(tok, teamId, statusEl){
+  for(let i=0;i<30;i++){
+    const r = await fetch(`${GRAPH}/groups/${teamId}/sites/root`, { headers:{ Authorization:`Bearer ${tok}` } });
+    if(r.ok) return r.json();
+    if(r.status !== 404) throw new Error(`Site lookup failed (${r.status})`);
+    statusLine(`<span class="spin"></span>Waiting for the SharePoint site (${i+1}/30)…`, true);
+    await new Promise(res => setTimeout(res, 4000));
+  }
+  throw new Error("SharePoint site never became available — try again in a minute");
+}
+
+function statusLine(html, replace){
+  const box = el("status");
+  if(replace && box.lastElementChild && box.lastElementChild.dataset.live){
+    box.lastElementChild.outerHTML = `<div class="line" data-live="1">${html}</div>`;
+  } else {
+    box.insertAdjacentHTML("beforeend", `<div class="line" data-live="1">${html}</div>`);
+  }
+}
+function statusDone(html){
+  const box = el("status");
+  if(box.lastElementChild && box.lastElementChild.dataset.live) box.lastElementChild.removeAttribute("data-live");
+  box.insertAdjacentHTML("beforeend", `<div class="line">${html}</div>`);
+}
+
+el("btnCreate").onclick = async () => {
+  const btn = el("btnCreate");
+  el("status").innerHTML = "";
+  const teamName = el("teamName").value.trim();
+  const description = el("teamDesc").value.trim();
+  const visibility = el("teamPrivacy").value;
+  const resourceHubEnabled = el("resourceHubEnabled").checked;
+
+  const channels = [...document.querySelectorAll(".channel-row")].map(r => ({
+    name: r.querySelector(".ch-name").value.trim(),
+    type: r.querySelector(".ch-type").value,
+  })).filter(c => c.name);
+
+  if(!teamName){ statusDone(`<span class="danger">Team name is required.</span>`); return; }
+  if(!channels.length){ statusDone(`<span class="danger">At least one named channel is required.</span>`); return; }
+  if(!owners.length){ statusDone(`<span class="danger">At least one owner is required.</span>`); return; }
+
+  const resolvedGroups = accessGroups.filter(g => g.id && (g.kb!=="none" || g.vault!=="none"));
+
+  btn.disabled = true;
+  try{
+    const tok = await token(SCOPES);
+
+    // ── 1. Create the team ──
+    statusLine(`<span class="spin"></span>Creating team "${escapeHtml(teamName)}"…`, true);
+    const first = channels[0];
+    const rest = channels.slice(1).filter(c => c.type === "Standard");
+    const body = {
+      "template@odata.bind": `${GRAPH}/teamsTemplates('standard')`,
+      displayName: teamName,
+      description: description || teamName,
+      visibility,
+      members: [memberBody(owners[0].id, "owner")],
+    };
+    if(first.type === "Standard"){
+      body.firstChannelName = first.name;
+      if(rest.length) body.channels = rest.map(c => ({ displayName:c.name, isFavoriteByDefault:true }));
+    } else {
+      body.firstChannelName = "General";
+      if(rest.length) body.channels = rest.map(c => ({ displayName:c.name, isFavoriteByDefault:true }));
+    }
+
+    const createRes = await fetch(`${GRAPH}/teams`, { method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" }, body: JSON.stringify(body) });
+    if(![201,202].includes(createRes.status)) throw new Error(`Team creation failed (${createRes.status})`);
+    const location = createRes.headers.get("Location") || "";
+    let teamId = (location.match(/teams\('([^']+)'\)/)||[])[1];
+
+    statusLine(`<span class="spin"></span>Provisioning…`, true);
+    for(let i=0;i<30;i++){
+      await new Promise(r=>setTimeout(r,4000));
+      if(!location) break;
+      const opRes = await fetch(`${GRAPH}${location}`, { headers:{ Authorization:`Bearer ${tok}` } });
+      if(opRes.ok){
+        const op = await opRes.json();
+        if(op.status==="succeeded"){ teamId = op.targetResourceId || teamId; break; }
+        if(op.status==="failed") throw new Error(op.error?.message || "Team provisioning failed");
+      }
+      statusLine(`<span class="spin"></span>Provisioning… (${i+1}/30)`, true);
+    }
+    if(!teamId) throw new Error("Team created but its ID couldn't be resolved");
+    statusDone(`<span class="ok">✓ Team created</span>`);
+
+    // ── 2. Remaining owners ──
+    for(const o of owners.slice(1)){
+      const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/members`, o);
+      statusDone(r.ok ? `<span class="ok">✓ ${escapeHtml(o.displayName)} added as team owner (${r.status})</span>` : `<span class="warn">⚠ ${escapeHtml(o.displayName)}: ${r.detail}</span>`);
+    }
+
+    // ── 3. Locate/create channels needing separate handling (private, or channel 1 if it was private) ──
+    let existingChannels = [];
+    for(let i=0;i<10;i++){
+      const r = await fetch(`${GRAPH}/teams/${teamId}/channels`, { headers:{ Authorization:`Bearer ${tok}` } });
+      if(r.ok){ existingChannels = (await r.json()).value || []; if(existingChannels.length) break; }
+      await new Promise(res=>setTimeout(res,2000));
+    }
+    const byName = {}; existingChannels.forEach(c => byName[c.displayName] = c.id);
+    const channelIds = [];
+
+    for(const ch of channels){
+      if(byName[ch.name]){ channelIds.push(byName[ch.name]); continue; }
+      if(ch.type !== "Private") continue; // standard ones should already exist from bulk create
+      statusLine(`<span class="spin"></span>Creating private channel "${escapeHtml(ch.name)}"…`, true);
+      const cr = await fetch(`${GRAPH}/teams/${teamId}/channels`, {
+        method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
+        body: JSON.stringify({ displayName: ch.name, membershipType:"private", members:[memberBody(owners[0].id,"owner")] }),
+      });
+      if(!cr.ok){ statusDone(`<span class="warn">⚠ Channel "${escapeHtml(ch.name)}" failed (${cr.status})</span>`); continue; }
+      const cd = await cr.json();
+      channelIds.push(cd.id);
+      statusDone(`<span class="ok">✓ Private channel "${escapeHtml(ch.name)}" created</span>`);
+      for(const o of owners.slice(1)){
+        const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/channels/${cd.id}/members`, o);
+        if(!r.ok) statusDone(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
+      }
+    }
+    // also ensure remaining owners on any PRE-EXISTING private channel (e.g. channel 1 fallback General is standard, skip)
+    for(const ch of channels){
+      if(ch.type==="Private" && byName[ch.name]){
+        for(const o of owners.slice(1)){
+          const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/channels/${byName[ch.name]}/members`, o);
+          if(!r.ok) statusDone(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
+        }
+      }
+    }
+
+    // ── 4. Resource Hub ──
+    if(resourceHubEnabled){
+      const site = await waitForGroupSite(tok, teamId);
+      statusDone(`<span class="ok">✓ SharePoint site ready</span>`);
+
+      statusLine(`<span class="spin"></span>Creating Resource Hub library…`, true);
+      const listRes = await fetch(`${GRAPH}/sites/${site.id}/lists`, {
+        method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
+        body: JSON.stringify({ displayName:"Resource Hub", list:{ template:"documentLibrary" } }),
+      });
+      if(!listRes.ok) throw new Error(`Library creation failed (${listRes.status})`);
+      const list = await listRes.json();
+      const drive = await (await fetch(`${GRAPH}/sites/${site.id}/lists/${list.id}/drive`, { headers:{ Authorization:`Bearer ${tok}` } })).json();
+      const root = await (await fetch(`${GRAPH}/drives/${drive.id}/root`, { headers:{ Authorization:`Bearer ${tok}` } })).json();
+      statusDone(`<span class="ok">✓ Resource Hub library created</span>`);
+
+      // Lock root first
+      const permFailures = [];
+      for(const o of owners){
+        const r = await grantFolderAccess(tok, drive.id, root.id, { email:o.mail }, "write", true);
+        if(!r.ok) permFailures.push(`root → ${o.displayName}: ${r.detail}`);
+      }
+      for(const g of resolvedGroups){
+        if(g.kb==="none" && g.vault==="none") continue;
+        const role = (g.kb==="write" || g.vault==="write") ? "write" : "read";
+        const r = await grantFolderAccess(tok, drive.id, root.id, { objectId:g.id }, role, false);
+        if(!r.ok) permFailures.push(`root → ${g.displayName}: ${r.detail}`);
+      }
+      await new Promise(res=>setTimeout(res,4000));
+
+      const FOLDERS = ["Knowledge Base","Vault"];
+      const folderIds = {};
+      for(const folderName of FOLDERS){
+        statusLine(`<span class="spin"></span>Creating "${folderName}"…`, true);
+        const folder = await graphCreateFolder(tok, drive.id, root.id, folderName);
+        folderIds[folderName] = folder.id;
+        for(const o of owners){
+          const r = await grantFolderAccess(tok, drive.id, folder.id, { email:o.mail }, "write", true);
+          if(!r.ok) permFailures.push(`${folderName} → ${o.displayName}: ${r.detail}`);
+        }
+        for(const g of resolvedGroups){
+          const key = folderName === "Knowledge Base" ? "kb" : "vault";
+          if(g[key] === "none") continue;
+          const r = await grantFolderAccess(tok, drive.id, folder.id, { objectId:g.id }, g[key], false);
+          if(!r.ok) permFailures.push(`${folderName} → ${g.displayName}: ${r.detail}`);
+        }
+        statusDone(`<span class="ok">✓ "${folderName}" created and permissioned</span>`);
+      }
+
+      // Defensive verification pass
+      statusLine(`<span class="spin"></span>Verifying permissions…`, true);
+      const allowedByLoc = { root: new Set(resolvedGroups.filter(g=>g.kb!=="none"||g.vault!=="none").map(g=>g.id)) };
+      allowedByLoc["Knowledge Base"] = new Set(resolvedGroups.filter(g=>g.kb!=="none").map(g=>g.id));
+      allowedByLoc["Vault"] = new Set(resolvedGroups.filter(g=>g.vault!=="none").map(g=>g.id));
+      const locItems = { root: root.id, ...folderIds };
+      const allGroupIds = new Set(resolvedGroups.map(g=>g.id));
+      for(const [loc, itemId] of Object.entries(locItems)){
+        const pr = await fetch(`${GRAPH}/drives/${drive.id}/items/${itemId}/permissions`, { headers:{ Authorization:`Bearer ${tok}` } });
+        if(!pr.ok) continue;
+        for(const perm of (await pr.json()).value || []){
+          const gid = perm.grantedToV2?.siteGroup?.id || perm.grantedToV2?.group?.id || perm.grantedTo?.group?.id
+            || perm.grantedToIdentitiesV2?.[0]?.siteGroup?.id || perm.grantedToIdentitiesV2?.[0]?.group?.id || null;
+          if(gid && allGroupIds.has(gid) && !allowedByLoc[loc].has(gid)){
+            await fetch(`${GRAPH}/drives/${drive.id}/items/${itemId}/permissions/${perm.id}`, { method:"DELETE", headers:{ Authorization:`Bearer ${tok}` } });
+          }
+        }
+      }
+      statusDone(`<span class="ok">✓ Permissions verified</span>`);
+
+      if(permFailures.length){
+        statusDone(`<span class="warn">⚠ ${permFailures.length} permission grant(s) had issues — see console (F12)</span>`);
+        console.warn("Permission failures:", permFailures);
+      }
+
+      // ── 5. Pin Resource Hub tab in every channel ──
+      statusLine(`<span class="spin"></span>Pinning Resource Hub tab…`, true);
+      for(const chId of channelIds){
+        await fetch(`${GRAPH}/teams/${teamId}/channels/${chId}/tabs`, {
+          method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
+          body: JSON.stringify({
+            displayName:"Resource Hub",
+            "teamsApp@odata.bind": `${GRAPH}/appCatalogs/teamsApps/com.microsoft.teamspace.tab.files.sharepoint`,
+            configuration:{ entityId:"", contentUrl: root.webUrl, removeUrl:null, websiteUrl:null },
+          }),
+        });
+      }
+      statusDone(`<span class="ok">✓ Resource Hub pinned in ${channelIds.length} channel(s)</span>`);
+    }
+
+    statusDone(`<span class="ok" style="font-weight:600">✓ All done — "${escapeHtml(teamName)}" is ready.</span>`);
+  }catch(e){
+    statusDone(`<span class="danger">✗ ${escapeHtml(e.message || String(e))}</span>`);
+  }finally{
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>
