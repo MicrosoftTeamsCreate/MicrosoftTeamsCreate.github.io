@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Team Forge — Provision a Team</title>
+<title>TeamStart — Provision a Team</title>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -152,12 +152,9 @@
   <div class="forge-mark">
     <svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 7l8 5 8-5M12 12v10" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/></svg>
   </div>
-  <h1>Team Forge</h1>
+  <h1>TeamStart</h1>
   <p>Sign in with your work account to provision a new Microsoft Team — channels, a shared Resource Hub library, and group-based folder permissions, all in one pass.</p>
   <button class="btn primary" id="btnSignIn">Sign in with Microsoft</button>
-  <div id="signinNote">
-    Works with any Microsoft 365 organization. You'll be asked to consent to a handful of permissions the first time — team creation, channel membership, and SharePoint file access — scoped to your own account, nothing is shared across organizations.
-  </div>
 </div>
 
 <!-- ============ APP ============ -->
@@ -165,7 +162,7 @@
   <div id="topbar">
     <div class="brand">
       <div class="forge-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/><path d="M4 7l8 5 8-5M12 12v10" stroke="#1A1206" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
-      <span class="brand-text">Team Forge</span>
+      <span class="brand-text">TeamStart</span>
     </div>
     <div style="display:flex; align-items:center; gap:14px">
       <span class="who" id="whoami"></span>
@@ -175,31 +172,26 @@
 
   <div class="card">
     <h2>Team details</h2>
-    <p class="sub">The basics — this becomes the Microsoft 365 group and Team name.</p>
+    <p class="sub">The basics — this becomes the Microsoft 365 group and Team name. Teams created here are always private.</p>
     <div class="field">
       <label class="field-label">Team name</label>
       <input type="text" id="teamName" placeholder="e.g. Finance Ops" />
     </div>
-    <div class="row">
-      <div class="field">
-        <label class="field-label">Description <span style="text-transform:none;color:var(--faint)">(optional)</span></label>
-        <input type="text" id="teamDesc" placeholder="What's this team for?" />
-      </div>
-      <div class="field" style="max-width:180px">
-        <label class="field-label">Privacy</label>
-        <select id="teamPrivacy"><option value="Private">Private</option><option value="Public">Public</option></select>
-      </div>
+    <div class="field">
+      <label class="field-label">Description <span style="text-transform:none;color:var(--faint)">(optional)</span></label>
+      <input type="text" id="teamDesc" placeholder="What's this team for?" />
     </div>
   </div>
 
   <div class="card">
-    <h2>Owners</h2>
-    <p class="sub">Everyone added here becomes a team owner, and an owner of any private channels below.</p>
+    <h2>Additional owners</h2>
+    <p class="sub">You'll automatically be made an owner of the team, its private channels, and the Resource Hub library — this is only for adding <em>anyone else</em> alongside you.</p>
     <div class="search-wrap">
       <input type="text" id="ownerSearch" placeholder="Type a name or email…" autocomplete="off" />
       <div class="search-results hide" id="ownerResults"></div>
     </div>
     <div class="chip-wrap" id="ownerChips"></div>
+    <div class="hint">Anyone added here also gets write access to the Workbench folder, Knowledge Base, and Vault — the same access level you get as the creator, not the more limited access the group-based permissions below give everyone else.</div>
   </div>
 
   <div class="card">
@@ -225,14 +217,8 @@
     </label>
   </div>
 
-  <div class="card" id="accessGroupsCard">
-    <h2>Folder access groups <span style="color:var(--faint); font-weight:400">(optional)</span></h2>
-    <p class="sub">Give specific security groups Read or Write access to Knowledge Base and/or Vault. Everyone else — including regular team members — is denied by default, matching how the folders' permissions are locked down.</p>
-    <div id="groupRows"></div>
-    <button class="add-link" id="btnAddGroup" style="margin-top:10px">+ Add an access group</button>
-  </div>
-
   <div class="card">
+    <div class="hint" style="margin-top:0; margin-bottom:14px">This tool sets up owners only. To add regular members to the team, do that manually in Teams once it's created — same for adding people to private channels beyond the owners above.</div>
     <div class="footbar">
       <button class="btn primary" id="btnCreate">Create team</button>
       <span style="flex:1"></span>
@@ -275,6 +261,7 @@ const SCOPES = [
 ];
 
 let account = null;
+let meUser = null; // resolved via /me right after sign-in — always the first/mandatory owner
 
 function el(id){ return document.getElementById(id); }
 function escapeHtml(s){
@@ -307,6 +294,20 @@ function enterApp(){
   el("app").classList.remove("hide");
   el("whoami").textContent = account.username;
   renderChannelRows();
+  resolveMe();
+}
+
+async function resolveMe(){
+  try{
+    const tok = await token(SCOPES);
+    const r = await fetch(`${GRAPH}/me?$select=id,displayName,mail,userPrincipalName`, { headers:{ Authorization:`Bearer ${tok}` } });
+    if(!r.ok) throw new Error(`${r.status}`);
+    const me = await r.json();
+    meUser = { id: me.id, displayName: me.displayName, mail: me.mail || me.userPrincipalName };
+  }catch(e){
+    console.error("Couldn't resolve signed-in user via /me:", e);
+    // btnCreate will surface a clear error if meUser is still null when submitted
+  }
 }
 
 /* ============ Owner picker (directory search + chips) ============ */
@@ -387,98 +388,42 @@ function renderChannelRows(){
 }
 el("channelCount").onchange = renderChannelRows;
 
-/* ============ Access group rows ============ */
-let accessGroups = []; // {rowId, id, displayName, kb, vault}
-let groupRowSeq = 0;
+/* ============ Resource Hub access — fixed group matrix ============
+   Matches the Cafeteria99 access document exactly: 12 groups get read-only
+   Knowledge Base and no Vault access; "All Vault Access" gets write on both.
+   Resolved by display name at runtime (not hardcoded object IDs) so this
+   still works if groups are ever recreated with new IDs. */
+const FIXED_ACCESS_GROUPS = [
+  { name: "Outsourced Accountant",                  kb: "read",  vault: "none"  },
+  { name: "Outsourced HR Partner",                  kb: "read",  vault: "none"  },
+  { name: "Outsourced Marketing Agency",            kb: "read",  vault: "none"  },
+  { name: "Outsourced Legal Counsel",               kb: "read",  vault: "none"  },
+  { name: "Outsourced IT Partner",                  kb: "read",  vault: "none"  },
+  { name: "Outsourced Supply Chain Consultant",     kb: "read",  vault: "none"  },
+  { name: "Outsourced Odoo Partner",                kb: "read",  vault: "none"  },
+  { name: "Operations Manager",                     kb: "read",  vault: "none"  },
+  { name: "Outlet Front-of-House (FOH) Leader",     kb: "read",  vault: "none"  },
+  { name: "Outlet Back-of-House (BOH) Leader",      kb: "read",  vault: "none"  },
+  { name: "Executive",                              kb: "read",  vault: "none"  },
+  { name: "Consultant",                             kb: "read",  vault: "none"  },
+  { name: "All Vault Access",                       kb: "write", vault: "write" },
+];
 
-function renderGroupRows(){
-  el("groupRows").innerHTML = accessGroups.map(g => {
-    if(g.id){
-      return `
-      <div class="group-row resolved" data-row="${g.rowId}">
-        <div class="top">
-          <div style="flex:1">
-            <div class="resolved-name">${escapeHtml(g.displayName)}</div>
-          </div>
-          <button class="remove" data-row="${g.rowId}">Remove</button>
-        </div>
-        <div class="access-line">
-          <label>Knowledge Base:
-            <select class="kb-access" data-row="${g.rowId}" style="width:auto;padding:4px 8px">
-              <option value="none" ${g.kb==="none"?"selected":""}>No access</option>
-              <option value="read" ${g.kb==="read"?"selected":""}>Read</option>
-              <option value="write" ${g.kb==="write"?"selected":""}>Read/Write</option>
-            </select>
-          </label>
-          <label>Vault:
-            <select class="vault-access" data-row="${g.rowId}" style="width:auto;padding:4px 8px">
-              <option value="none" ${g.vault==="none"?"selected":""}>No access</option>
-              <option value="read" ${g.vault==="read"?"selected":""}>Read</option>
-              <option value="write" ${g.vault==="write"?"selected":""}>Read/Write</option>
-            </select>
-          </label>
-        </div>
-      </div>`;
-    }
-    return `
-      <div class="group-row" data-row="${g.rowId}">
-        <div class="top">
-          <div class="search-wrap">
-            <input type="text" class="group-search" data-row="${g.rowId}" placeholder="Type a security group name…" autocomplete="off" />
-            <div class="search-results hide"></div>
-          </div>
-          <button class="remove" data-row="${g.rowId}">Remove</button>
-        </div>
-      </div>`;
-  }).join("");
-
-  el("groupRows").querySelectorAll(".remove").forEach(b => {
-    b.onclick = () => { accessGroups = accessGroups.filter(g => g.rowId !== b.dataset.row); renderGroupRows(); };
-  });
-  el("groupRows").querySelectorAll(".kb-access").forEach(s => {
-    s.onchange = () => { accessGroups.find(g=>g.rowId===s.dataset.row).kb = s.value; };
-  });
-  el("groupRows").querySelectorAll(".vault-access").forEach(s => {
-    s.onchange = () => { accessGroups.find(g=>g.rowId===s.dataset.row).vault = s.value; };
-  });
-  el("groupRows").querySelectorAll(".group-search").forEach(input => {
-    input.oninput = (e) => {
-      const q = e.target.value.trim();
-      const rowId = input.dataset.row;
-      const box = input.parentElement.querySelector(".search-results");
-      clearTimeout(input._t);
-      if(q.length < 2){ box.classList.add("hide"); return; }
-      input._t = setTimeout(async () => {
-        const mySeq = ++groupRowSeq;
-        box.classList.remove("hide");
-        box.innerHTML = `<div class="search-empty"><span class="spin"></span>Searching…</div>`;
-        let groups;
-        try{ groups = await searchDirectory(q, "group"); }
-        catch(err){ if(mySeq!==groupRowSeq) return; box.innerHTML = `<div class="search-empty">${escapeHtml(err.message)}</div>`; return; }
-        if(mySeq !== groupRowSeq) return;
-        if(!groups.length){ box.innerHTML = `<div class="search-empty">No matches</div>`; return; }
-        box.innerHTML = groups.map(g => `
-          <div class="search-row" data-id="${escapeHtml(g.id)}">
-            <div>${escapeHtml(g.displayName||"")}</div>
-          </div>`).join("");
-        box.querySelectorAll(".search-row").forEach(row => {
-          row.onclick = () => {
-            const g = groups.find(x => x.id === row.dataset.id);
-            const entry = accessGroups.find(x => x.rowId === rowId);
-            entry.id = g.id; entry.displayName = g.displayName;
-            entry.kb = "read"; entry.vault = "none";
-            renderGroupRows();
-          };
-        });
-      }, 300);
-    };
-  });
+async function resolveFixedGroups(tok, statusFn){
+  const resolved = [];
+  for(const g of FIXED_ACCESS_GROUPS){
+    const url = new URL(`${GRAPH}/groups`);
+    url.searchParams.set("$filter", `displayName eq '${g.name.replace(/'/g,"''")}'`);
+    url.searchParams.set("$select", "id,displayName");
+    url.searchParams.set("$count", "true");
+    const r = await fetch(url, { headers:{ Authorization:`Bearer ${tok}`, ConsistencyLevel:"eventual" } });
+    if(!r.ok){ statusFn(`<span class="warn">⚠ Couldn't look up "${escapeHtml(g.name)}" (${r.status})</span>`); continue; }
+    const matches = (await r.json()).value || [];
+    if(!matches.length){ statusFn(`<span class="warn">⚠ Group "${escapeHtml(g.name)}" not found — skipped</span>`); continue; }
+    resolved.push({ id: matches[0].id, displayName: g.name, kb: g.kb, vault: g.vault });
+  }
+  return resolved;
 }
-
-el("btnAddGroup").onclick = () => {
-  accessGroups.push({ rowId: "g" + Date.now() + Math.random().toString(36).slice(2,6), id:null, displayName:"", kb:"none", vault:"none" });
-  renderGroupRows();
-};
 
 /* ============================================================
    CREATE TEAM — orchestration
@@ -569,7 +514,7 @@ el("btnCreate").onclick = async () => {
   el("status").innerHTML = "";
   const teamName = el("teamName").value.trim();
   const description = el("teamDesc").value.trim();
-  const visibility = el("teamPrivacy").value;
+  const visibility = "Private"; // teams created here are always private
   const resourceHubEnabled = el("resourceHubEnabled").checked;
 
   const channels = [...document.querySelectorAll(".channel-row")].map(r => ({
@@ -579,13 +524,16 @@ el("btnCreate").onclick = async () => {
 
   if(!teamName){ statusDone(`<span class="danger">Team name is required.</span>`); return; }
   if(!channels.length){ statusDone(`<span class="danger">At least one named channel is required.</span>`); return; }
-  if(!owners.length){ statusDone(`<span class="danger">At least one owner is required.</span>`); return; }
+  if(!meUser){ statusDone(`<span class="danger">Couldn't confirm your own account — try refreshing and signing in again.</span>`); return; }
 
-  const resolvedGroups = accessGroups.filter(g => g.id && (g.kb!=="none" || g.vault!=="none"));
+  // You're always the first/mandatory owner; anyone added in "Additional owners" comes after
+  const allOwners = [meUser, ...owners.filter(o => o.id !== meUser.id)];
 
   btn.disabled = true;
   try{
     const tok = await token(SCOPES);
+    statusLine(`<span class="spin"></span>Resolving Resource Hub access groups…`, true);
+    const resolvedGroups = resourceHubEnabled ? await resolveFixedGroups(tok, statusDone) : [];
 
     // ── 1. Create the team ──
     statusLine(`<span class="spin"></span>Creating team "${escapeHtml(teamName)}"…`, true);
@@ -596,7 +544,7 @@ el("btnCreate").onclick = async () => {
       displayName: teamName,
       description: description || teamName,
       visibility,
-      members: [memberBody(owners[0].id, "owner")],
+      members: [memberBody(allOwners[0].id, "owner")],
     };
     if(first.type === "Standard"){
       body.firstChannelName = first.name;
@@ -627,7 +575,7 @@ el("btnCreate").onclick = async () => {
     statusDone(`<span class="ok">✓ Team created</span>`);
 
     // ── 2. Remaining owners ──
-    for(const o of owners.slice(1)){
+    for(const o of allOwners.slice(1)){
       const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/members`, o);
       statusDone(r.ok ? `<span class="ok">✓ ${escapeHtml(o.displayName)} added as team owner (${r.status})</span>` : `<span class="warn">⚠ ${escapeHtml(o.displayName)}: ${r.detail}</span>`);
     }
@@ -648,13 +596,13 @@ el("btnCreate").onclick = async () => {
       statusLine(`<span class="spin"></span>Creating private channel "${escapeHtml(ch.name)}"…`, true);
       const cr = await fetch(`${GRAPH}/teams/${teamId}/channels`, {
         method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
-        body: JSON.stringify({ displayName: ch.name, membershipType:"private", members:[memberBody(owners[0].id,"owner")] }),
+        body: JSON.stringify({ displayName: ch.name, membershipType:"private", members:[memberBody(allOwners[0].id,"owner")] }),
       });
       if(!cr.ok){ statusDone(`<span class="warn">⚠ Channel "${escapeHtml(ch.name)}" failed (${cr.status})</span>`); continue; }
       const cd = await cr.json();
       channelIds.push(cd.id);
       statusDone(`<span class="ok">✓ Private channel "${escapeHtml(ch.name)}" created</span>`);
-      for(const o of owners.slice(1)){
+      for(const o of allOwners.slice(1)){
         const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/channels/${cd.id}/members`, o);
         if(!r.ok) statusDone(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
       }
@@ -662,7 +610,7 @@ el("btnCreate").onclick = async () => {
     // also ensure remaining owners on any PRE-EXISTING private channel (e.g. channel 1 fallback General is standard, skip)
     for(const ch of channels){
       if(ch.type==="Private" && byName[ch.name]){
-        for(const o of owners.slice(1)){
+        for(const o of allOwners.slice(1)){
           const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/channels/${byName[ch.name]}/members`, o);
           if(!r.ok) statusDone(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
         }
@@ -687,7 +635,7 @@ el("btnCreate").onclick = async () => {
 
       // Lock root first
       const permFailures = [];
-      for(const o of owners){
+      for(const o of allOwners){
         const r = await grantFolderAccess(tok, drive.id, root.id, { email:o.mail }, "write", true);
         if(!r.ok) permFailures.push(`root → ${o.displayName}: ${r.detail}`);
       }
@@ -705,7 +653,7 @@ el("btnCreate").onclick = async () => {
         statusLine(`<span class="spin"></span>Creating "${folderName}"…`, true);
         const folder = await graphCreateFolder(tok, drive.id, root.id, folderName);
         folderIds[folderName] = folder.id;
-        for(const o of owners){
+        for(const o of allOwners){
           const r = await grantFolderAccess(tok, drive.id, folder.id, { email:o.mail }, "write", true);
           if(!r.ok) permFailures.push(`${folderName} → ${o.displayName}: ${r.detail}`);
         }
