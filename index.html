@@ -144,19 +144,30 @@
   .footbar{display:flex; align-items:center; gap:12px; margin-top:6px}
   .hint{font-size:11.5px; color:var(--faint); line-height:1.6; margin-top:8px}
 
-#resultsSummary{margin-top:20px}
-.access-summary-card{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:16px; margin-top:12px}
-.access-summary-card h4{margin:0 0 4px; font-size:14px; font-weight:700}
-.access-summary-card .desc{font-size:12.5px; color:var(--muted); margin:0 0 10px; line-height:1.5}
-.access-summary-card a.portal-link{
-  display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--spark);
-  text-decoration:none; word-break:break-all;
+/* ===== Success page ===== */
+#successScreen{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px 24px}
+.success-inner{max-width:640px; width:100%; text-align:center}
+.success-check{
+  width:64px; height:64px; border-radius:50%; margin:0 auto 20px;
+  background:linear-gradient(135deg, var(--ok), #22a35a);
+  display:flex; align-items:center; justify-content:center;
+  font-size:32px; font-weight:800; color:#06210F;
+  box-shadow:0 12px 40px rgba(74,222,128,.25);
 }
-.access-summary-card a.portal-link:hover{text-decoration:underline}
-.access-tag{display:inline-block; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 8px; border-radius:999px; margin-left:8px}
-.access-tag.write{background:rgba(74,222,128,.15); color:var(--ok)}
-.access-tag.read{background:rgba(94,234,212,.15); color:var(--spark)}
-.access-tag.workbench{background:rgba(242,166,90,.15); color:var(--ember)}
+#successScreen h1{font-size:30px; font-weight:800; margin:0 0 8px}
+.success-sub{color:var(--muted); font-size:15px; margin:0 0 30px; line-height:1.6}
+#successCards{display:flex; flex-direction:column; gap:16px; text-align:left}
+.success-card{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:22px}
+.success-card .emoji{font-size:22px; margin-right:8px}
+.success-card h3{margin:0 0 6px; font-size:17px; font-weight:700}
+.success-card p{margin:0 0 14px; color:var(--muted); font-size:13.5px; line-height:1.6}
+.success-card .btn{width:100%; text-align:center; display:block}
+.success-card .group-links{display:flex; flex-wrap:wrap; gap:8px}
+.success-card .group-links a{
+  background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+  padding:8px 12px; font-size:12.5px; color:var(--text); text-decoration:none;
+}
+.success-card .group-links a:hover{border-color:var(--spark); color:var(--spark)}
 </style>
 </head>
 <body>
@@ -238,7 +249,19 @@
       <span style="flex:1"></span>
     </div>
     <div id="status" style="margin-top:16px"></div>
-    <div id="resultsSummary" class="hide"></div>
+  </div>
+</div>
+
+<!-- ============ SUCCESS PAGE ============ -->
+<div id="successScreen" class="hide">
+  <div class="success-inner">
+    <div class="success-check">✓</div>
+    <h1 id="successTitle">Your team is ready!</h1>
+    <p class="success-sub">Now let's add some people. Just click a button below for what you want them to be able to do.</p>
+
+    <div id="successCards"></div>
+
+    <button class="btn ghost" id="btnCreateAnother" style="margin-top:28px">Create another team</button>
   </div>
 </div>
 
@@ -531,46 +554,63 @@ function azurePortalGroupMembersUrl(groupId){
   return `https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/${groupId}/menuId/`;
 }
 
-function renderAccessSummary(teamId, resolvedGroups){
-  const box = el("resultsSummary");
-  box.classList.remove("hide");
+function showSuccessScreen(teamName, teamId, resolvedGroups){
+  el("app").classList.add("hide");
+  el("successScreen").classList.remove("hide");
+  el("successTitle").textContent = `"${teamName}" is ready!`;
 
-  const teamUrl = azurePortalGroupMembersUrl(teamId);
-  let html = `<h3 style="margin:20px 0 4px">Add people to this team</h3>
-    <p style="color:var(--muted); font-size:13px; margin:0 0 4px">Each link opens that group's Members page directly in the Entra portal. Adding someone to a group is what actually grants them access — pick the right one based on what they need. The group ID in each link is specific to this team, generated just now.</p>`;
+  const readGroups = resolvedGroups.filter(g => g.vault !== "write");
+  const writeGroups = resolvedGroups.filter(g => g.vault === "write");
 
+  let html = "";
+
+  // 1. Team members — plain chat/files access
   html += `
-    <div class="access-summary-card">
-      <h4>Team members <span class="access-tag workbench">Workbench only</span></h4>
-      <p class="desc">Adds someone as a regular team member. Gives access to the team's standard channels (Workbench) only — no access to Knowledge Base or Vault.</p>
-      <a class="portal-link" href="${teamUrl}" target="_blank" rel="noopener">${teamUrl} ↗</a>
+    <div class="success-card">
+      <h3><span class="emoji">💬</span>Let someone chat and share files</h3>
+      <p>Click the button. Pick a person. They can now talk in the team and use its channels.</p>
+      <a class="btn primary" href="${azurePortalGroupMembersUrl(teamId)}" target="_blank" rel="noopener">Add someone →</a>
     </div>`;
 
-  for(const g of resolvedGroups){
-    const isVaultGroup = g.vault === "write";
-    const tag = isVaultGroup
-      ? `<span class="access-tag write">Read/Write · Knowledge Base + Vault</span>`
-      : `<span class="access-tag read">Read only · Knowledge Base</span>`;
-    const desc = isVaultGroup
-      ? `Adding someone here gives them read and write access to both Knowledge Base and Vault.`
-      : `Adding someone here gives them read-only access to Knowledge Base. No access to Vault.`;
-    const url = azurePortalGroupMembersUrl(g.id);
+  // 2. Read-only groups — "look but not touch"
+  if(readGroups.length){
     html += `
-      <div class="access-summary-card">
-        <h4>${escapeHtml(g.displayName)} ${tag}</h4>
-        <p class="desc">${desc}</p>
-        <a class="portal-link" href="${url}" target="_blank" rel="noopener">${url} ↗</a>
+      <div class="success-card">
+        <h3><span class="emoji">👀</span>Let someone look at the shared files</h3>
+        <p>They can see and open the files, but can't change or delete anything. Pick the group that matches who they are:</p>
+        <div class="group-links">
+          ${readGroups.map(g => `<a href="${azurePortalGroupMembersUrl(g.id)}" target="_blank" rel="noopener">${escapeHtml(g.displayName)}</a>`).join("")}
+        </div>
       </div>`;
   }
 
-  box.innerHTML = html;
+  // 3. Write groups — full access including Vault
+  if(writeGroups.length){
+    html += `
+      <div class="success-card">
+        <h3><span class="emoji">✏️</span>Let someone fully edit everything</h3>
+        <p>This gives full access to every shared file — including the extra-locked Vault folder. Only use this for people who really need it.</p>
+        <div class="group-links">
+          ${writeGroups.map(g => `<a href="${azurePortalGroupMembersUrl(g.id)}" target="_blank" rel="noopener">${escapeHtml(g.displayName)}</a>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  el("successCards").innerHTML = html;
 }
+
+el("btnCreateAnother").onclick = () => {
+  el("successScreen").classList.add("hide");
+  el("app").classList.remove("hide");
+  el("teamName").value = ""; el("teamDesc").value = "";
+  owners = []; renderOwnerChips();
+  el("channelCount").value = "1"; renderChannelRows();
+  el("status").innerHTML = "";
+};
 
 el("btnCreate").onclick = async () => {
   const btn = el("btnCreate");
   el("status").innerHTML = "";
-  el("resultsSummary").classList.add("hide");
-  el("resultsSummary").innerHTML = "";
   const teamName = el("teamName").value.trim();
   const description = el("teamDesc").value.trim();
   const visibility = "Private"; // teams created here are always private
@@ -765,8 +805,8 @@ el("btnCreate").onclick = async () => {
       statusDone(`<span class="ok">✓ Resource Hub pinned in ${channelIds.length} channel(s)</span>`);
     }
 
-    statusDone(`<span class="ok" style="font-weight:600">✓ All done — "${escapeHtml(teamName)}" is ready.</span>`);
-    renderAccessSummary(teamId, resolvedGroups);
+    statusDone(`<span class="ok" style="font-weight:600">✓ All done!</span>`);
+    showSuccessScreen(teamName, teamId, resolvedGroups);
   }catch(e){
     statusDone(`<span class="danger">✗ ${escapeHtml(e.message || String(e))}</span>`);
   }finally{
