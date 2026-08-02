@@ -580,7 +580,7 @@ function azurePortalGroupMembersUrl(groupId){
   return `https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/${groupId}/menuId/`;
 }
 
-function showSuccessScreen(teamName, teamId, resolvedGroups){
+function showSuccessScreen(teamName, teamId, resolvedGroups, hubUrl){
   el("app").classList.add("hide");
   el("successScreen").classList.remove("hide");
   el("successTitle").textContent = `"${teamName}" is ready!`;
@@ -594,7 +594,7 @@ function showSuccessScreen(teamName, teamId, resolvedGroups){
   html += `
     <div class="success-card">
       <h3><span class="emoji">💬</span>Let someone chat and share files</h3>
-      <p>Click the button. Pick a person. They can now talk in the team and use its channels.</p>
+      <p>Click the button. Pick a person. This gives them full read/write access to the Workbench folder only — chat, channels, and files there. It does <strong>not</strong> give them access to Knowledge Base or Vault (use the cards below for that, in addition to this one).</p>
       <a class="btn primary" href="${azurePortalGroupMembersUrl(teamId)}" target="_blank" rel="noopener">Add someone →</a>
     </div>`;
 
@@ -603,7 +603,7 @@ function showSuccessScreen(teamName, teamId, resolvedGroups){
     html += `
       <div class="success-card">
         <h3><span class="emoji">👀</span>Let someone look at the shared files</h3>
-        <p>They can see and open the files, but can't change or delete anything. Pick the group that matches who they are:</p>
+        <p>This gives read-only access to Knowledge Base — they can see and open files there, but can't change or delete anything. It does <strong>not</strong> include Workbench or Vault access — add them above too if they also need Workbench. Pick the group that matches who they are:</p>
         <div class="group-links">
           ${readGroups.map(g => `<a href="${azurePortalGroupMembersUrl(g.id)}" target="_blank" rel="noopener">${escapeHtml(g.displayName)}</a>`).join("")}
         </div>
@@ -615,10 +615,27 @@ function showSuccessScreen(teamName, teamId, resolvedGroups){
     html += `
       <div class="success-card">
         <h3><span class="emoji">✏️</span>Let someone fully edit everything</h3>
-        <p>This gives full access to every shared file — including the extra-locked Vault folder. Only use this for people who really need it.</p>
+        <p>This gives full read/write access to both Knowledge Base and the extra-locked Vault folder. It does <strong>not</strong> include Workbench access — add them above too if they also need that. Only use this for people who really need it.</p>
         <div class="group-links">
           ${writeGroups.map(g => `<a href="${azurePortalGroupMembersUrl(g.id)}" target="_blank" rel="noopener">${escapeHtml(g.displayName)}</a>`).join("")}
         </div>
+      </div>`;
+  }
+
+  // 4. Keep files forever — retention label, direct link + simple steps
+  if(hubUrl){
+    html += `
+      <div class="success-card">
+        <h3><span class="emoji">🔒</span>Keep these files forever</h3>
+        <p>Files in Knowledge Base and Vault can still be deleted by mistake unless you turn this on. It stops that — once it's on, nothing in this folder can ever be permanently deleted.</p>
+        <p style="margin-bottom:6px"><strong>Steps:</strong></p>
+        <ol style="margin:0 0 14px 18px; padding:0; color:var(--muted); font-size:13.5px; line-height:1.8">
+          <li>Click the button below to open the shared folder.</li>
+          <li>Click <strong>Settings</strong> (the gear icon), then <strong>Apply Label</strong>.</li>
+          <li>In the dropdown, pick <strong>"Retain Items Forever (Retain forever)"</strong>.</li>
+          <li>Click <strong>Save</strong>.</li>
+        </ol>
+        <a class="btn primary" href="${hubUrl}" target="_blank" rel="noopener">Open the shared folder →</a>
       </div>`;
   }
 
@@ -664,6 +681,7 @@ el("btnCreate").onclick = async () => {
     const tok = await token(SCOPES);
 
     let resolvedGroups = [];
+    let hubUrl = null;
     if(resourceHubEnabled){
       resolvedGroups = await resolveFixedGroups(tok, appendLine);
       setStep("resolveGroups", `<span class="ok">✓ Checked access groups</span>`);
@@ -775,6 +793,7 @@ el("btnCreate").onclick = async () => {
       const list = await listRes.json();
       const drive = await (await fetch(`${GRAPH}/sites/${site.id}/lists/${list.id}/drive`, { headers:{ Authorization:`Bearer ${tok}` } })).json();
       const root = await (await fetch(`${GRAPH}/drives/${drive.id}/root`, { headers:{ Authorization:`Bearer ${tok}` } })).json();
+      hubUrl = root.webUrl;
       setStep("hubLibrary", `<span class="ok">✓ Shared folder created</span>`);
 
       // Lock root first
@@ -850,7 +869,7 @@ el("btnCreate").onclick = async () => {
       setStep("pin", `<span class="ok">✓ Added to ${channelIds.length} channel(s)</span>`);
     }
 
-    showSuccessScreen(teamName, teamId, resolvedGroups);
+    showSuccessScreen(teamName, teamId, resolvedGroups, hubUrl);
   }catch(e){
     appendLine(`<span class="danger">✗ ${escapeHtml(e.message || String(e))}</span>`);
   }finally{
