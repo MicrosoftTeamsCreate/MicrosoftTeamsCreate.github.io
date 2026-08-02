@@ -447,7 +447,7 @@ const FIXED_ACCESS_GROUPS = [
   { name: "All Vault Access",                       kb: "write", vault: "write" },
 ];
 
-async function resolveFixedGroups(tok, statusFn){
+async function resolveFixedGroups(tok, warnFn){
   const resolved = [];
   for(const g of FIXED_ACCESS_GROUPS){
     const url = new URL(`${GRAPH}/groups`);
@@ -455,9 +455,9 @@ async function resolveFixedGroups(tok, statusFn){
     url.searchParams.set("$select", "id,displayName");
     url.searchParams.set("$count", "true");
     const r = await fetch(url, { headers:{ Authorization:`Bearer ${tok}`, ConsistencyLevel:"eventual" } });
-    if(!r.ok){ statusFn(`<span class="warn">⚠ Couldn't look up "${escapeHtml(g.name)}" (${r.status})</span>`); continue; }
+    if(!r.ok){ warnFn(`<span class="warn">⚠ Couldn't look up "${escapeHtml(g.name)}" (${r.status})</span>`); continue; }
     const matches = (await r.json()).value || [];
-    if(!matches.length){ statusFn(`<span class="warn">⚠ Group "${escapeHtml(g.name)}" not found — skipped</span>`); continue; }
+    if(!matches.length){ warnFn(`<span class="warn">⚠ Group "${escapeHtml(g.name)}" not found — skipped</span>`); continue; }
     resolved.push({ id: matches[0].id, displayName: g.name, kb: g.kb, vault: g.vault });
   }
   return resolved;
@@ -522,32 +522,58 @@ async function grantFolderAccess(tok, driveId, itemId, recipient, role, breakInh
   return { ok:true };
 }
 
-async function waitForGroupSite(tok, teamId, statusEl){
+async function waitForGroupSite(tok, teamId){
   for(let i=0;i<30;i++){
     const r = await fetch(`${GRAPH}/groups/${teamId}/sites/root`, { headers:{ Authorization:`Bearer ${tok}` } });
     if(r.ok) return r.json();
     if(r.status !== 404) throw new Error(`Site lookup failed (${r.status})`);
-    statusLine(`<span class="spin"></span>Waiting for the SharePoint site (${i+1}/30)…`, true);
+    setStep("site", `<span class="spin"></span>Getting the shared site ready (${i+1}/30)…`);
     await new Promise(res => setTimeout(res, 4000));
   }
-  throw new Error("SharePoint site never became available — try again in a minute");
+  throw new Error("The shared site never became available — try again in a minute");
 }
 
-function statusLine(html, replace){
-  const box = el("status");
-  if(replace && box.lastElementChild && box.lastElementChild.dataset.live){
-    box.lastElementChild.outerHTML = `<div class="line" data-live="1">${html}</div>`;
-  } else {
-    box.insertAdjacentHTML("beforeend", `<div class="line" data-live="1">${html}</div>`);
+/* ============================================================
+   Status checklist — build the FULL plan upfront (based on form state),
+   render every step as pending immediately, then flip each one to done/
+   failed as it actually completes. Nothing appears late; nothing is
+   left frozen mid-spin.
+   ============================================================ */
+function buildStepPlan(channels, additionalOwnerCount, resourceHubEnabled){
+  const steps = [];
+  if(resourceHubEnabled) steps.push({ id:"resolveGroups", label:"Checking access groups" });
+  steps.push({ id:"createTeam", label:"Creating the team" });
+  steps.push({ id:"provision", label:"Setting things up" });
+  for(let i=0;i<additionalOwnerCount;i++) steps.push({ id:`owner${i}`, label:"Adding an extra owner" });
+  channels.forEach((ch,i) => {
+    if(ch.type === "Private") steps.push({ id:`channel${i}`, label:`Creating "${ch.name}"` });
+  });
+  if(resourceHubEnabled){
+    steps.push({ id:"site",       label:"Getting the shared site ready" });
+    steps.push({ id:"hubLibrary", label:"Creating the shared folder" });
+    steps.push({ id:"kb",         label:'Creating "Knowledge Base"' });
+    steps.push({ id:"vault",      label:'Creating "Vault"' });
+    steps.push({ id:"verify",     label:"Double-checking permissions" });
+    steps.push({ id:"pin",        label:"Adding shortcuts to channels" });
   }
+  return steps;
 }
-function statusDone(html){
-  const box = el("status");
-  if(box.lastElementChild && box.lastElementChild.dataset.live){
-    box.lastElementChild.outerHTML = `<div class="line">${html}</div>`;
-  } else {
-    box.insertAdjacentHTML("beforeend", `<div class="line">${html}</div>`);
-  }
+
+function renderStepPlan(steps){
+  el("status").innerHTML = steps.map(s =>
+    `<div class="line" id="step-${s.id}"><span class="spin"></span>${escapeHtml(s.label)}…</div>`
+  ).join("");
+}
+
+// Updates a planned step in place. Falls back to appending a new line if the
+// id isn't part of the plan (e.g. one-off warnings/errors).
+function setStep(id, html){
+  const node = document.getElementById(`step-${id}`);
+  if(node){ node.innerHTML = html; }
+  else { el("status").insertAdjacentHTML("beforeend", `<div class="line">${html}</div>`); }
+}
+function appendLine(html){
+  el("status").insertAdjacentHTML("beforeend", `<div class="line">${html}</div>`);
 }
 
 function azurePortalGroupMembersUrl(groupId){
@@ -621,21 +647,30 @@ el("btnCreate").onclick = async () => {
     type: r.querySelector(".ch-type").value,
   })).filter(c => c.name);
 
-  if(!teamName){ statusDone(`<span class="danger">Team name is required.</span>`); return; }
-  if(!channels.length){ statusDone(`<span class="danger">At least one named channel is required.</span>`); return; }
-  if(!meUser){ statusDone(`<span class="danger">Couldn't confirm your own account — try refreshing and signing in again.</span>`); return; }
+  if(!teamName){ appendLine(`<span class="danger">Team name is required.</span>`); return; }
+  if(!channels.length){ appendLine(`<span class="danger">At least one named channel is required.</span>`); return; }
+  if(!meUser){ appendLine(`<span class="danger">Couldn't confirm your own account — try refreshing and signing in again.</span>`); return; }
 
   // You're always the first/mandatory owner; anyone added in "Additional owners" comes after
   const allOwners = [meUser, ...owners.filter(o => o.id !== meUser.id)];
 
+  // Build and show the FULL checklist immediately — every step visible and
+  // spinning right away, nothing appears late.
+  const plan = buildStepPlan(channels, allOwners.length - 1, resourceHubEnabled);
+  renderStepPlan(plan);
+
   btn.disabled = true;
   try{
     const tok = await token(SCOPES);
-    statusLine(`<span class="spin"></span>Resolving Resource Hub access groups…`, true);
-    const resolvedGroups = resourceHubEnabled ? await resolveFixedGroups(tok, statusDone) : [];
+
+    let resolvedGroups = [];
+    if(resourceHubEnabled){
+      resolvedGroups = await resolveFixedGroups(tok, appendLine);
+      setStep("resolveGroups", `<span class="ok">✓ Checked access groups</span>`);
+    }
 
     // ── 1. Create the team ──
-    statusLine(`<span class="spin"></span>Creating team "${escapeHtml(teamName)}"…`, true);
+    setStep("createTeam", `<span class="spin"></span>Creating the team…`);
     const first = channels[0];
     const rest = channels.slice(1).filter(c => c.type === "Standard");
     const body = {
@@ -657,8 +692,9 @@ el("btnCreate").onclick = async () => {
     if(![201,202].includes(createRes.status)) throw new Error(`Team creation failed (${createRes.status})`);
     const location = createRes.headers.get("Location") || "";
     let teamId = (location.match(/teams\('([^']+)'\)/)||[])[1];
+    setStep("createTeam", `<span class="ok">✓ Team created</span>`);
 
-    statusLine(`<span class="spin"></span>Provisioning…`, true);
+    setStep("provision", `<span class="spin"></span>Setting things up…`);
     for(let i=0;i<30;i++){
       await new Promise(r=>setTimeout(r,4000));
       if(!location) break;
@@ -668,15 +704,19 @@ el("btnCreate").onclick = async () => {
         if(op.status==="succeeded"){ teamId = op.targetResourceId || teamId; break; }
         if(op.status==="failed") throw new Error(op.error?.message || "Team provisioning failed");
       }
-      statusLine(`<span class="spin"></span>Provisioning… (${i+1}/30)`, true);
+      setStep("provision", `<span class="spin"></span>Setting things up (${i+1}/30)…`);
     }
     if(!teamId) throw new Error("Team created but its ID couldn't be resolved");
-    statusDone(`<span class="ok">✓ Team created</span>`);
+    setStep("provision", `<span class="ok">✓ Ready</span>`);
 
     // ── 2. Remaining owners ──
+    let ownerIdx = 0;
     for(const o of allOwners.slice(1)){
+      const stepId = `owner${ownerIdx++}`;
       const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/members`, o);
-      statusDone(r.ok ? `<span class="ok">✓ ${escapeHtml(o.displayName)} added as team owner (${r.status})</span>` : `<span class="warn">⚠ ${escapeHtml(o.displayName)}: ${r.detail}</span>`);
+      setStep(stepId, r.ok
+        ? `<span class="ok">✓ ${escapeHtml(o.displayName)} added as owner</span>`
+        : `<span class="warn">⚠ ${escapeHtml(o.displayName)}: ${r.detail}</span>`);
     }
 
     // ── 3. Locate/create channels needing separate handling (private, or channel 1 if it was private) ──
@@ -689,29 +729,34 @@ el("btnCreate").onclick = async () => {
     const byName = {}; existingChannels.forEach(c => byName[c.displayName] = c.id);
     const channelIds = [];
 
-    for(const ch of channels){
-      if(byName[ch.name]){ channelIds.push(byName[ch.name]); continue; }
+    for(let i=0;i<channels.length;i++){
+      const ch = channels[i];
+      const stepId = `channel${i}`;
+      if(byName[ch.name]){
+        channelIds.push(byName[ch.name]);
+        if(ch.type === "Private") setStep(stepId, `<span class="ok">✓ "${escapeHtml(ch.name)}" created</span>`);
+        continue;
+      }
       if(ch.type !== "Private") continue; // standard ones should already exist from bulk create
-      statusLine(`<span class="spin"></span>Creating private channel "${escapeHtml(ch.name)}"…`, true);
       const cr = await fetch(`${GRAPH}/teams/${teamId}/channels`, {
         method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
         body: JSON.stringify({ displayName: ch.name, membershipType:"private", members:[memberBody(allOwners[0].id,"owner")] }),
       });
-      if(!cr.ok){ statusDone(`<span class="warn">⚠ Channel "${escapeHtml(ch.name)}" failed (${cr.status})</span>`); continue; }
+      if(!cr.ok){ setStep(stepId, `<span class="warn">⚠ "${escapeHtml(ch.name)}" failed (${cr.status})</span>`); continue; }
       const cd = await cr.json();
       channelIds.push(cd.id);
-      statusDone(`<span class="ok">✓ Private channel "${escapeHtml(ch.name)}" created</span>`);
+      setStep(stepId, `<span class="ok">✓ "${escapeHtml(ch.name)}" created</span>`);
       for(const o of allOwners.slice(1)){
         const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/channels/${cd.id}/members`, o);
-        if(!r.ok) statusDone(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
+        if(!r.ok) appendLine(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
       }
     }
-    // also ensure remaining owners on any PRE-EXISTING private channel (e.g. channel 1 fallback General is standard, skip)
+    // also ensure remaining owners on any PRE-EXISTING private channel
     for(const ch of channels){
       if(ch.type==="Private" && byName[ch.name]){
         for(const o of allOwners.slice(1)){
           const r = await ensureOwner(tok, `${GRAPH}/teams/${teamId}/channels/${byName[ch.name]}/members`, o);
-          if(!r.ok) statusDone(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
+          if(!r.ok) appendLine(`<span class="warn">⚠ ${escapeHtml(o.displayName)} on "${escapeHtml(ch.name)}": ${r.detail}</span>`);
         }
       }
     }
@@ -719,9 +764,9 @@ el("btnCreate").onclick = async () => {
     // ── 4. Resource Hub ──
     if(resourceHubEnabled){
       const site = await waitForGroupSite(tok, teamId);
-      statusDone(`<span class="ok">✓ SharePoint site ready</span>`);
+      setStep("site", `<span class="ok">✓ Shared site ready</span>`);
 
-      statusLine(`<span class="spin"></span>Creating Resource Hub library…`, true);
+      setStep("hubLibrary", `<span class="spin"></span>Creating the shared folder…`);
       const listRes = await fetch(`${GRAPH}/sites/${site.id}/lists`, {
         method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
         body: JSON.stringify({ displayName:"Resource Hub", list:{ template:"documentLibrary" } }),
@@ -730,7 +775,7 @@ el("btnCreate").onclick = async () => {
       const list = await listRes.json();
       const drive = await (await fetch(`${GRAPH}/sites/${site.id}/lists/${list.id}/drive`, { headers:{ Authorization:`Bearer ${tok}` } })).json();
       const root = await (await fetch(`${GRAPH}/drives/${drive.id}/root`, { headers:{ Authorization:`Bearer ${tok}` } })).json();
-      statusDone(`<span class="ok">✓ Resource Hub library created</span>`);
+      setStep("hubLibrary", `<span class="ok">✓ Shared folder created</span>`);
 
       // Lock root first
       const permFailures = [];
@@ -746,10 +791,10 @@ el("btnCreate").onclick = async () => {
       }
       await new Promise(res=>setTimeout(res,4000));
 
-      const FOLDERS = ["Knowledge Base","Vault"];
+      const FOLDERS = [["Knowledge Base","kb"], ["Vault","vault"]];
       const folderIds = {};
-      for(const folderName of FOLDERS){
-        statusLine(`<span class="spin"></span>Creating "${folderName}"…`, true);
+      for(const [folderName, stepId] of FOLDERS){
+        setStep(stepId, `<span class="spin"></span>Creating "${folderName}"…`);
         const folder = await graphCreateFolder(tok, drive.id, root.id, folderName);
         folderIds[folderName] = folder.id;
         for(const o of allOwners){
@@ -762,11 +807,11 @@ el("btnCreate").onclick = async () => {
           const r = await grantFolderAccess(tok, drive.id, folder.id, { objectId:g.id }, g[key], false);
           if(!r.ok) permFailures.push(`${folderName} → ${g.displayName}: ${r.detail}`);
         }
-        statusDone(`<span class="ok">✓ "${folderName}" created and permissioned</span>`);
+        setStep(stepId, `<span class="ok">✓ "${folderName}" created</span>`);
       }
 
       // Defensive verification pass
-      statusLine(`<span class="spin"></span>Verifying permissions…`, true);
+      setStep("verify", `<span class="spin"></span>Double-checking permissions…`);
       const allowedByLoc = { root: new Set(resolvedGroups.filter(g=>g.kb!=="none"||g.vault!=="none").map(g=>g.id)) };
       allowedByLoc["Knowledge Base"] = new Set(resolvedGroups.filter(g=>g.kb!=="none").map(g=>g.id));
       allowedByLoc["Vault"] = new Set(resolvedGroups.filter(g=>g.vault!=="none").map(g=>g.id));
@@ -783,15 +828,15 @@ el("btnCreate").onclick = async () => {
           }
         }
       }
-      statusDone(`<span class="ok">✓ Permissions verified</span>`);
+      setStep("verify", `<span class="ok">✓ Permissions checked out</span>`);
 
       if(permFailures.length){
-        statusDone(`<span class="warn">⚠ ${permFailures.length} permission grant(s) had issues — see console (F12)</span>`);
+        appendLine(`<span class="warn">⚠ ${permFailures.length} permission grant(s) had issues — see console (F12)</span>`);
         console.warn("Permission failures:", permFailures);
       }
 
       // ── 5. Pin Resource Hub tab in every channel ──
-      statusLine(`<span class="spin"></span>Pinning Resource Hub tab…`, true);
+      setStep("pin", `<span class="spin"></span>Adding shortcuts to channels…`);
       for(const chId of channelIds){
         await fetch(`${GRAPH}/teams/${teamId}/channels/${chId}/tabs`, {
           method:"POST", headers:{ Authorization:`Bearer ${tok}`, "Content-Type":"application/json" },
@@ -802,13 +847,12 @@ el("btnCreate").onclick = async () => {
           }),
         });
       }
-      statusDone(`<span class="ok">✓ Resource Hub pinned in ${channelIds.length} channel(s)</span>`);
+      setStep("pin", `<span class="ok">✓ Added to ${channelIds.length} channel(s)</span>`);
     }
 
-    statusDone(`<span class="ok" style="font-weight:600">✓ All done!</span>`);
     showSuccessScreen(teamName, teamId, resolvedGroups);
   }catch(e){
-    statusDone(`<span class="danger">✗ ${escapeHtml(e.message || String(e))}</span>`);
+    appendLine(`<span class="danger">✗ ${escapeHtml(e.message || String(e))}</span>`);
   }finally{
     btn.disabled = false;
   }
