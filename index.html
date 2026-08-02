@@ -143,6 +143,20 @@
 
   .footbar{display:flex; align-items:center; gap:12px; margin-top:6px}
   .hint{font-size:11.5px; color:var(--faint); line-height:1.6; margin-top:8px}
+
+#resultsSummary{margin-top:20px}
+.access-summary-card{background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:16px; margin-top:12px}
+.access-summary-card h4{margin:0 0 4px; font-size:14px; font-weight:700}
+.access-summary-card .desc{font-size:12.5px; color:var(--muted); margin:0 0 10px; line-height:1.5}
+.access-summary-card a.portal-link{
+  display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--spark);
+  text-decoration:none; word-break:break-all;
+}
+.access-summary-card a.portal-link:hover{text-decoration:underline}
+.access-tag{display:inline-block; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 8px; border-radius:999px; margin-left:8px}
+.access-tag.write{background:rgba(74,222,128,.15); color:var(--ok)}
+.access-tag.read{background:rgba(94,234,212,.15); color:var(--spark)}
+.access-tag.workbench{background:rgba(242,166,90,.15); color:var(--ember)}
 </style>
 </head>
 <body>
@@ -224,6 +238,7 @@
       <span style="flex:1"></span>
     </div>
     <div id="status" style="margin-top:16px"></div>
+    <div id="resultsSummary" class="hide"></div>
   </div>
 </div>
 
@@ -505,13 +520,57 @@ function statusLine(html, replace){
 }
 function statusDone(html){
   const box = el("status");
-  if(box.lastElementChild && box.lastElementChild.dataset.live) box.lastElementChild.removeAttribute("data-live");
-  box.insertAdjacentHTML("beforeend", `<div class="line">${html}</div>`);
+  if(box.lastElementChild && box.lastElementChild.dataset.live){
+    box.lastElementChild.outerHTML = `<div class="line">${html}</div>`;
+  } else {
+    box.insertAdjacentHTML("beforeend", `<div class="line">${html}</div>`);
+  }
+}
+
+function azurePortalGroupMembersUrl(groupId){
+  return `https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/${groupId}/menuId/`;
+}
+
+function renderAccessSummary(teamId, resolvedGroups){
+  const box = el("resultsSummary");
+  box.classList.remove("hide");
+
+  const teamUrl = azurePortalGroupMembersUrl(teamId);
+  let html = `<h3 style="margin:20px 0 4px">Add people to this team</h3>
+    <p style="color:var(--muted); font-size:13px; margin:0 0 4px">Each link opens that group's Members page directly in the Entra portal. Adding someone to a group is what actually grants them access — pick the right one based on what they need. The group ID in each link is specific to this team, generated just now.</p>`;
+
+  html += `
+    <div class="access-summary-card">
+      <h4>Team members <span class="access-tag workbench">Workbench only</span></h4>
+      <p class="desc">Adds someone as a regular team member. Gives access to the team's standard channels (Workbench) only — no access to Knowledge Base or Vault.</p>
+      <a class="portal-link" href="${teamUrl}" target="_blank" rel="noopener">${teamUrl} ↗</a>
+    </div>`;
+
+  for(const g of resolvedGroups){
+    const isVaultGroup = g.vault === "write";
+    const tag = isVaultGroup
+      ? `<span class="access-tag write">Read/Write · Knowledge Base + Vault</span>`
+      : `<span class="access-tag read">Read only · Knowledge Base</span>`;
+    const desc = isVaultGroup
+      ? `Adding someone here gives them read and write access to both Knowledge Base and Vault.`
+      : `Adding someone here gives them read-only access to Knowledge Base. No access to Vault.`;
+    const url = azurePortalGroupMembersUrl(g.id);
+    html += `
+      <div class="access-summary-card">
+        <h4>${escapeHtml(g.displayName)} ${tag}</h4>
+        <p class="desc">${desc}</p>
+        <a class="portal-link" href="${url}" target="_blank" rel="noopener">${url} ↗</a>
+      </div>`;
+  }
+
+  box.innerHTML = html;
 }
 
 el("btnCreate").onclick = async () => {
   const btn = el("btnCreate");
   el("status").innerHTML = "";
+  el("resultsSummary").classList.add("hide");
+  el("resultsSummary").innerHTML = "";
   const teamName = el("teamName").value.trim();
   const description = el("teamDesc").value.trim();
   const visibility = "Private"; // teams created here are always private
@@ -707,6 +766,7 @@ el("btnCreate").onclick = async () => {
     }
 
     statusDone(`<span class="ok" style="font-weight:600">✓ All done — "${escapeHtml(teamName)}" is ready.</span>`);
+    renderAccessSummary(teamId, resolvedGroups);
   }catch(e){
     statusDone(`<span class="danger">✗ ${escapeHtml(e.message || String(e))}</span>`);
   }finally{
