@@ -603,7 +603,7 @@ function showSuccessScreen(teamName, teamId, resolvedGroups, hubUrl){
     html += `
       <div class="success-card">
         <h3><span class="emoji">👀</span>Let someone look at the shared files</h3>
-        <p>If anyone wants to access Knowledge Base, add them to any of the groups below. Clicking gives read-only access to Knowledge Base — once added, they'll be able to see and open files there, but can't change or delete anything. It does <strong>not</strong> include Workbench access — add them above too if they also need that.</p>
+        <p>If anyone wants to access Knowledge Base, add them to any of the groups below. Clicking gives read-only access to Knowledge Base — once added, they'll be able to see and open files there, but can't change or delete anything.</p>
         <div class="group-links">
           ${readGroups.map(g => `<a href="${azurePortalGroupMembersUrl(g.id)}" target="_blank" rel="noopener">${escapeHtml(g.displayName)}</a>`).join("")}
         </div>
@@ -615,7 +615,7 @@ function showSuccessScreen(teamName, teamId, resolvedGroups, hubUrl){
     html += `
       <div class="success-card">
         <h3><span class="emoji">✏️</span>Let someone fully edit everything</h3>
-        <p>If anyone wants to access the Vault, add them to the group below. Once added, they'll be able to read and write both Knowledge Base and Vault. It does <strong>not</strong> include Workbench access — add them above too if they also need that. Only use this for people who really need it.</p>
+        <p>If anyone wants to access the Vault, add them to the group below. Once added, they'll be able to read and write both Knowledge Base and Vault. Only use this for people who really need it.</p>
         <div class="group-links">
           ${writeGroups.map(g => `<a href="${azurePortalGroupMembersUrl(g.id)}" target="_blank" rel="noopener">${escapeHtml(g.displayName)}</a>`).join("")}
         </div>
@@ -626,8 +626,7 @@ function showSuccessScreen(teamName, teamId, resolvedGroups, hubUrl){
   if(hubUrl){
     html += `
       <div class="success-card">
-        <h3><span class="emoji">🔒</span>Keep these files forever</h3>
-        <p>Files in Knowledge Base and Vault can still be deleted by mistake unless you turn this on. It stops that — once it's on, nothing in this folder can ever be permanently deleted.</p>
+        <h3><span class="emoji">🔒</span>Apply Retention Policy to Knowledge Base and Vault Folder</h3>
         <p style="margin-bottom:6px"><strong>Steps:</strong></p>
         <ol style="margin:0 0 14px 18px; padding:0; color:var(--muted); font-size:13.5px; line-height:1.8">
           <li>Click the button below — it opens the label page directly.</li>
